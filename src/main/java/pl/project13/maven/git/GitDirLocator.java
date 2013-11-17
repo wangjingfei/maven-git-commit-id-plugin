@@ -18,6 +18,7 @@
 package pl.project13.maven.git;
 
 import com.google.common.base.Optional;
+import com.google.common.collect.ObjectArrays;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.project.MavenProject;
 import org.eclipse.jgit.lib.Constants;
@@ -34,14 +35,13 @@ import java.util.List;
  * @author <a href="mailto:konrad.malawski@java.pl">Konrad 'ktoso' Malawski</a>
  */
 public class GitDirLocator {
-  @NotNull
+
   final LoggerBridge loggerBridge;
   final MavenProject mavenProject;
   final List<MavenProject> reactorProjects;
   final boolean stopAtFileSystemBoundary;
 
-  public GitDirLocator(MavenProject mavenProject, List<MavenProject> reactorProjects, LoggerBridge loggerBridge,
-                       boolean stopAtFileSystemBoundary) {
+  public GitDirLocator(MavenProject mavenProject, List<MavenProject> reactorProjects, LoggerBridge loggerBridge, boolean stopAtFileSystemBoundary) {
     this.mavenProject = mavenProject;
     this.reactorProjects = reactorProjects;
     this.loggerBridge = loggerBridge;
@@ -49,7 +49,7 @@ public class GitDirLocator {
   }
 
   @Nullable
-  public File lookupGitDirectory(@NotNull File manuallyConfiguredDir) {
+  public File lookupGitDirectory(@NotNull File manuallyConfiguredDir) throws IOException {
     if (manuallyConfiguredDir.exists()) {
       return findProjectGitDirectory(manuallyConfiguredDir);
     } else {
@@ -57,7 +57,7 @@ public class GitDirLocator {
     }
   }
 
-  private File findProjectGitDirectory(File gitFileOrFolder) {
+  private File findProjectGitDirectory(File gitFileOrFolder) throws IOException {
     if (gitFileOrFolder.exists()) {
       if (gitFileOrFolder.isDirectory()) {
         return gitFileOrFolder;
@@ -75,7 +75,7 @@ public class GitDirLocator {
    * @return File which represents the location of the .git directory or NULL if none found.
    */
   @Nullable
-  private File findProjectGitDirectory() {
+  private File findProjectGitDirectory() throws IOException {
     MavenProject currentProject = this.mavenProject;
 
     while (currentProject != null) {
@@ -85,7 +85,10 @@ public class GitDirLocator {
 
       if (isExistingDirectory(dir)) {
         return dir;
+      } else if (dir == null) {
+        return null;
       }
+
       // If the path exists but is not a directory it might be a git submodule "gitdir" link.
       File gitDirLinkPath = processGitDirFile(dir);
 
@@ -101,8 +104,9 @@ public class GitDirLocator {
       if (currentProject.getParent() == null && currentProject.getParentArtifact() != null) {
         Optional<MavenProject> maybeFoundParentProject = getReactorParentProject(currentProject);
 
-        if (maybeFoundParentProject.isPresent())
-        currentProject = maybeFoundParentProject.get();
+        if (maybeFoundParentProject.isPresent()) {
+          currentProject = maybeFoundParentProject.get();
+        }
 
       } else {
         // Get the parent, or NULL if no parent AND no parentArtifact.
@@ -112,10 +116,10 @@ public class GitDirLocator {
     if (stopAtFileSystemBoundary) {
       log("Searching until filesytem boundary is hit");
       File dir = mavenProject.getBasedir();
-      while(dir.getParentFile() != null) {
+      while (dir.getParentFile() != null) {
         log("Searching for .git folder in %s", dir.getAbsolutePath());
         File gitDir = findProjectGitDirectory(appendDotGit(dir));
-        if (gitDir != null){
+        if (gitDir != null) {
           return gitDir;
         }
         dir = dir.getParentFile();
@@ -124,7 +128,6 @@ public class GitDirLocator {
 
     return null;
   }
-
 
 
   /**
@@ -153,50 +156,43 @@ public class GitDirLocator {
    *
    * @return File object with path loaded or null
    */
-  private File processGitDirFile(@NotNull File file) {
-    log("Processing submodule %s", file.getAbsolutePath());
+  private File processGitDirFile(@NotNull File file) throws IOException {
+    log("Processing submodule", file.getAbsolutePath(), "...");
+    BufferedReader reader = null;
+
     try {
-      BufferedReader reader = null;
+      reader = new BufferedReader(new FileReader(file));
 
-      try {
-        reader = new BufferedReader(new FileReader(file));
+      // There should be just one line in the file, e.g.
+      // "gitdir: /usr/local/src/parentproject/.git/modules/submodule"
+      String line = reader.readLine();
 
-        // There should be just one line in the file, e.g.
-        // "gitdir: /usr/local/src/parentproject/.git/modules/submodule"
-        String line = reader.readLine();
+      // Separate the key and the value in the string.
+      String[] parts = line.split(": ");
 
-        // Separate the key and the value in the string.
-        String[] parts = line.split(": ");
-
-        // If we don't have 2 parts or if the key is not gitdir then give up.
-        if (parts.length != 2 || !parts[0].equals("gitdir")) {
-          return null;
-        }
-
-        // All seems ok so return the "gitdir" value read from the file.
-        File found = new File(file.getParentFile(), parts[1]);
-        log("Found git root from .git file: %s", found.getAbsolutePath());
-        if (isExistingDirectory(found)) {
-          return found;
-        } else {
-          log("Folder does not exist");
-        }
-      } catch (FileNotFoundException e) {
-
-      } finally {
-        if (reader != null) {
-          reader.close();
-        }
+      // If we don't have 2 parts or if the key is not gitdir then give up.
+      if (parts.length != 2 || !parts[0].equals("gitdir")) {
+        return null;
       }
-    } catch (IOException e) {
 
+      // All seems ok so return the "gitdir" value read from the file.
+      File found = new File(file.getParentFile(), parts[1]);
+      log("Found git root from .git file:", found.getAbsolutePath());
+      if (isExistingDirectory(found)) {
+        return found;
+      } else {
+        throw new FileNotFoundException("Unable to work on .git directory, " + found.getAbsolutePath() + ", as it does not exist!");
+      }
+    } finally {
+      if (reader != null) {
+        reader.close();
+      }
     }
-    return null;
   }
 
+  // FIXME Shouldn't this look at the dotGitDirectory property (if set) for the given project?
   @NotNull
   private static File appendDotGit(@NotNull File directory) {
-    // FIXME Shouldn't this look at the dotGitDirectory property (if set) for the given project?
     return new File(directory, Constants.DOT_GIT);
   }
 
@@ -205,6 +201,6 @@ public class GitDirLocator {
   }
 
   void log(String message, String... interpolations) {
-    loggerBridge.log(GitCommitIdMojo.logPrefix + message, (Object[]) interpolations);
+    loggerBridge.log(ObjectArrays.concat(GitCommitIdMojo.logPrefix + message, interpolations));
   }
 }

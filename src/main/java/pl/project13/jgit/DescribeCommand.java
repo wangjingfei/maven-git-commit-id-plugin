@@ -180,7 +180,7 @@ public class DescribeCommand extends GitCommand<DescribeResult> {
   public DescribeCommand forceLongFormat(@Nullable Boolean forceLongFormat) {
     if (forceLongFormat != null) {
       this.forceLongFormat = forceLongFormat;
-      log("--long = %s", forceLongFormat);
+      log("--long =", forceLongFormat);
     }
     return this;
   }

@@ -104,6 +104,7 @@ public class GitCommitIdMojoIntegrationTest extends GitIntegrationTest {
     assertGitPropertiesPresentInProject(targetProject.getProperties());
   }
 
+  @Test
   public void shouldFailWithExceptionWhenNoGitRepoFound() throws Exception {
     // given
     mavenSandbox.withParentProject("my-pom-project", "pom")
@@ -128,7 +129,7 @@ public class GitCommitIdMojoIntegrationTest extends GitIntegrationTest {
   }
 
   @Test
-  public void shouldGenerateCustomPropertiesFile() throws Exception {
+  public void shouldGenerateCustomPropertiesFileName() throws Exception {
     // given
     mavenSandbox.withParentProject("my-pom-project", "pom")
                 .withChildProject("my-jar-module", "jar")
@@ -137,12 +138,42 @@ public class GitCommitIdMojoIntegrationTest extends GitIntegrationTest {
 
     MavenProject targetProject = mavenSandbox.getChildProject();
 
-    String targetFilePath = "target/classes/custom-git.properties";
-    File expectedFile = new File(targetProject.getBasedir(), targetFilePath);
+    String targetPath = "custom-git.properties";
+    File expectedFile = new File(targetProject.getBasedir(), targetPath);
 
     setProjectToExecuteMojoIn(targetProject);
     alterMojoSettings("generateGitPropertiesFile", true);
-    alterMojoSettings("generateGitPropertiesFilename", expectedFile.getAbsolutePath());
+    alterMojoSettings("generateGitPropertiesFilename", targetPath);
+
+    // when
+    try {
+      mojo.execute();
+
+      // then
+      assertThat(expectedFile).exists();
+    } finally {
+      Files.delete(expectedFile);
+    }
+  }
+
+  @Test
+  public void shouldGenerateCustomPropertiesFileInSubDirectory() throws Exception {
+    // given
+    mavenSandbox.withParentProject("my-pom-project", "pom")
+                .withChildProject("my-jar-module", "jar")
+                .withGitRepoInChild(AvailableGitTestRepo.GIT_COMMIT_ID)
+                .create(CleanUp.CLEANUP_FIRST);
+
+    MavenProject targetProject = mavenSandbox.getChildProject();
+
+    String targetPath = "extras/custom-git.properties";
+    File target = new File(targetProject.getBasedir(), "target");
+    File classes = new File(target, "classes");
+    File expectedFile = new File(classes, targetPath);
+
+    setProjectToExecuteMojoIn(targetProject);
+    alterMojoSettings("generateGitPropertiesFile", true);
+    alterMojoSettings("generateGitPropertiesFilename", targetPath);
 
     // when
     try {
