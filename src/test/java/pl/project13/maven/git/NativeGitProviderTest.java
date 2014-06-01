@@ -1,164 +1,93 @@
 package pl.project13.maven.git;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Scanner;
-import org.fest.util.Arrays;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
+import org.apache.maven.project.MavenProject;
+import org.eclipse.jgit.lib.Repository;
 import org.junit.Before;
 import org.junit.Test;
-import java.io.FileNotFoundException;
 
-import static org.junit.Assert.*;
+import java.io.File;
+import org.apache.maven.plugin.MojoExecutionException;
+import java.util.Map;
+import java.util.Properties;
 
-/**
-*
-* @author Krzysztof Suszyński <krzysztof.suszynski@gmail.com>
-*/
+import static org.fest.assertions.Assertions.assertThat;
+import static org.mockito.Mockito.*;
+
 public class NativeGitProviderTest {
 
-  private File directory;
+  GitCommitIdMojo mojo;
+  NativeGitProvider nativeGitProvider;
 
   @Before
-  public void setUp() {
-    directory = new File(System.getProperty("java.io.tmpdir"));
+  public void setUp() throws Exception {
+    File dotGitDirectory = new File(new File(".git/").getAbsolutePath());
+    GitDescribeConfig gitDescribeConfig = new GitDescribeConfig();
+    gitDescribeConfig.setSkip(false);
+
+    String prefix = "git";
+    int abbrevLength = 7;
+    String dateFormat = "dd.MM.yyyy '@' HH:mm:ss z";
+    boolean verbose = true;
+
+    mojo = new GitCommitIdMojo();
+    mojo.setDotGitDirectory(dotGitDirectory);
+    mojo.setPrefix(prefix);
+    mojo.setAbbrevLength(abbrevLength);
+    mojo.setDateFormat(dateFormat);
+    mojo.setVerbose(verbose);
+    mojo.useNativeGit(false);
+    mojo.setGitDescribe(gitDescribeConfig);
+
+
+    mojo.runningTests = true;
+    mojo.project = mock(MavenProject.class, RETURNS_MOCKS);
+    when(mojo.project.getPackaging()).thenReturn("jar");
+
+    nativeGitProvider = NativeGitProvider.on(mojo.lookupGitDirectory()).withLoggerBridge(mojo.getLoggerBridge());
   }
 
-  private String loadSample(String sample) {
-    String fileName = "/" + sample + ".xml";
-    try{
-      InputStream stream = this.getClass().getResourceAsStream(fileName);
-      if(stream == null){
-        throw new FileNotFoundException("FAILED TO OPEN " + fileName);
-      }
-      return convertStreamToString(stream).replaceFirst("<\\?xml.+\\?>", "").replaceAll(">\\s+<", "><");
-    }catch(Exception e){
-      e.printStackTrace();
-    }
-    return "";
-  }
-
-  private static String convertStreamToString(InputStream inputStream) {
-    Scanner scanner = new Scanner(inputStream).useDelimiter("\\A");
-    return scanner.hasNext() ? scanner.next() : "";
-  }
-
-  private Map<String, String> getDefaultTestData(){
-    Map<String, String> map = new HashMap<String, String>();
-    map.put("git describe --tags", "v0.0.3-2557-gd79f2d5");
-    map.put("git symbolic-ref HEAD", "refs/heads/master");
-    map.put("git log -1 --format=", loadSample("sample-onbranch-with-tags"));
-    map.put("git remote -v", "origin https://git.example.org/sample-project.git (fetch)\n"
-            + "origin https://git.example.org/sample-project.git (push)");
-    return map;
-  }
-
-  private String[] getDefaultExpectedKeys(){
-    String[] expectedKeys = Arrays.array(
-            GitCommitIdMojo.COMMIT_DESCRIBE,
-            GitCommitIdMojo.BRANCH,
-            GitCommitIdMojo.REMOTE_ORIGIN_URL,
-            GitCommitIdMojo.COMMIT_ID,
-            GitCommitIdMojo.COMMIT_ID_ABBREV,
-            GitCommitIdMojo.COMMIT_AUTHOR_NAME,
-            GitCommitIdMojo.COMMIT_AUTHOR_EMAIL,
-            GitCommitIdMojo.COMMIT_MESSAGE_SHORT,
-            GitCommitIdMojo.COMMIT_MESSAGE_FULL,
-            GitCommitIdMojo.COMMIT_TIME,
-            GitCommitIdMojo.BUILD_AUTHOR_NAME,
-            GitCommitIdMojo.BUILD_AUTHOR_EMAIL
-    );
-	return expectedKeys;
-  }
- 
-  private String[] getDefaultExpectedValue(String expectedGitTag, String expectedGitBranch){
-    String[] expectedValues = Arrays.array(
-            expectedGitTag,
-            expectedGitBranch,
-            "https://git.example.org/sample-project.git",
-            "d79f2d589079c591852ee610135ecd3acb6faf0c",
-            "d79f2d5",
-            "Krzysztof Suszyński",
-            "krzysztof.suszynski@example.org",
-            "A sample git subject line",
-            "A sample git body contents.\n"
-            + "A other sample git body contents. Even with XML tags: <3 <xml />.",
-            "04.02.2014 @ 14:53:35 CET",
-            "Jan Kowalski",
-            "jan.kowalski@example.org"
-    );
-    return expectedValues;
-  }
-
-  /**
-   * Test of loadGitData method, of class NativeGitProvider.
-   */
   @Test
-  public void testLoadGitData() throws Exception {
-    Map<String, String> map = getDefaultTestData();
-    FakeRunner runner = new FakeRunner(map);
-    NativeGitProvider instance = new NativeGitProvider(runner, "dd.MM.yyyy '@' HH:mm:ss z");
-    Map<String, String> result = instance.loadGitData(directory);
-    String[] expectedKeys = getDefaultExpectedKeys();
-    String[] expectedValues = getDefaultExpectedValue("v0.0.3-2557-gd79f2d5","master");
-    assertArrayEquals(expectedKeys, result.keySet().toArray());
-    assertArrayEquals(expectedValues, result.values().toArray());
+  public void testGetOriginRemoteWithNewLine() throws MojoExecutionException {
+    // given
+    String expectedRemoteUrl = "git@github.com:JohnDoe/maven-git-commit-id-plugin.git";
+
+    NativeGitProvider nativeGit = mock(NativeGitProvider.class);
+    StringBuilder testRemoteURL = new StringBuilder();
+    testRemoteURL.append("remote git://github.com/JaneDoe/maven-git-commit-id-plugin.git (fetch)\n");
+    testRemoteURL.append("remote git://github.com/JaneDoe/maven-git-commit-id-plugin.git (push)\n");
+
+    testRemoteURL.append("origin "+expectedRemoteUrl+" (fetch)\n");
+    testRemoteURL.append("origin "+expectedRemoteUrl+" (push)");
+
+    when(nativeGit.runGitCommand(any(File.class),any(String.class))).thenReturn(testRemoteURL.toString());
+    when(nativeGit.getOriginRemote(any(File.class))).thenCallRealMethod();
+
+    // when
+    String result = nativeGit.getOriginRemote(new File(".git"));
+    
+    // then
+    assertThat(result).isNotNull();
+    assertThat(result.equals(expectedRemoteUrl)).isTrue();
   }
 
-  /**
-   * Test of loadGitData method, of class NativeGitProvider.
-   */
   @Test
-  public void testLoadGitDataDetachedWithTags() throws Exception {
-    Map<String, String> map = getDefaultTestData();
-    FakeRunner runner = new FakeRunner(map);
-    NativeGitProvider instance = new NativeGitProvider(runner, "dd.MM.yyyy '@' HH:mm:ss z");
-    Map<String, String> result = instance.loadGitData(directory);
-    String[] expectedKeys = getDefaultExpectedKeys();
-    String[] expectedValues = getDefaultExpectedValue("v0.0.3-2557-gd79f2d5","master");
-    assertArrayEquals(expectedKeys, result.keySet().toArray());
-    assertArrayEquals(expectedValues, result.values().toArray());
-  }
+  public void testGetOriginRemoteWithNoOriginAvailable() throws MojoExecutionException {
+    // given
+    NativeGitProvider nativeGit = mock(NativeGitProvider.class);
+    StringBuilder testRemoteURL = new StringBuilder();
+    testRemoteURL.append("remote git://github.com/JaneDoe/maven-git-commit-id-plugin.git (fetch)\n");
+    testRemoteURL.append("remote git://github.com/JaneDoe/maven-git-commit-id-plugin.git (push)");
 
-  /**
-   * Test of loadGitData method, of class NativeGitProvider.
-   */
-  @Test
-  public void testLoadGitDataDetachedWithoutTags() throws Exception {
-    Map<String, String> map = new HashMap<String, String>();
-    map.put("git log -1 --format=", loadSample("sample-onbranch-with-tags"));
-    map.put("git remote -v", "origin https://git.example.org/sample-project.git (fetch)\n"
-            + "origin https://git.example.org/sample-project.git (push)");
-    FakeRunner runner = new FakeRunner(map);
-    NativeGitProvider instance = new NativeGitProvider(runner, "dd.MM.yyyy '@' HH:mm:ss z");
-    Map<String, String> result = instance.loadGitData(directory);
-    String[] expectedKeys = getDefaultExpectedKeys();
-    String[] expectedValues = getDefaultExpectedValue(null,null);
-    assertArrayEquals(expectedKeys, result.keySet().toArray());
-    assertArrayEquals(expectedValues, result.values().toArray());
-  }
+    when(nativeGit.runGitCommand(any(File.class),any(String.class))).thenReturn(testRemoteURL.toString());
+    when(nativeGit.getOriginRemote(any(File.class))).thenCallRealMethod();
 
-  private class FakeRunner implements NativeGitProvider.CliRunner {
-    private Map<String, String> map;
+    // when
+    String result = nativeGit.getOriginRemote(new File(".git"));
 
-    public FakeRunner(Map<String, String> map) {
-      this.map = map;
-    }
-
-    @Override
-    public String run(File directory, String command) throws IOException {
-      if (command == null) {
-        throw new IOException("Can not run `null` command");
-      }
-      for (Map.Entry<String, String> entry : map.entrySet()) {
-        if (command.trim().contains(entry.getKey())) {
-          return entry.getValue();
-        }
-      }
-      throw new IOException(String.format("Unknown command: `%s`", command));
-    }
+    // then
+    assertThat(result).isNotNull();
   }
 
 }
